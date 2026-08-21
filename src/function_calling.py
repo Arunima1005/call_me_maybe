@@ -9,13 +9,9 @@ from llm_sdk.llm_sdk import Small_LLM_Model
 from model import FunctionDefinition
 
 
-NUMBER_PREFIX = re.compile(
-    r"^-?(0|[1-9][0-9]*)(\.[0-9]*)?$"
-)
+NUMBER_PREFIX = re.compile(r"^-?(0|[1-9][0-9]*)(\.[0-9]*)?$")
 
-INTEGER_PREFIX = re.compile(
-    r"^-?(0|[1-9][0-9]*)$"
-)
+INTEGER_PREFIX = re.compile(r"^-?(0|[1-9][0-9]*)$")
 
 
 def is_number_prefix(value: str) -> bool:
@@ -145,25 +141,6 @@ def tokenize_function_names(
     return token_sequences
 
 
-# def choose_best_allowed_token(
-#     logits: np.ndarray,
-#     allowed_tokens: set[int],
-# ) -> int:
-
-#     if not allowed_tokens:
-#         raise ValueError("No valid next token")
-
-#     allowed = np.array(
-#         list(allowed_tokens),
-#         dtype=np.int64,
-#     )
-
-#     best_index = np.argmax(
-#         logits[allowed]
-#     )
-
-#     return int(allowed[best_index])
-
 def mask_logits(
     logits: np.ndarray,
     allowed_tokens: set[int],
@@ -200,17 +177,32 @@ def get_allowed_next_tokens(
     return allowed_tokens
 
 
+# def choose_best_allowed_token(
+#     logits: list[float],
+#     allowed_tokens: set[int],
+# ) -> int:
+#     if not allowed_tokens:
+#         raise ValueError("No valid next token")
+
+#     return max(
+#         allowed_tokens,
+#         key=lambda token_id: logits[token_id],
+#     )
+
 def choose_best_allowed_token(
     logits: list[float],
     allowed_tokens: set[int],
 ) -> int:
-    if not allowed_tokens:
-        raise ValueError("No valid next token")
 
-    return max(
-        allowed_tokens,
-        key=lambda token_id: logits[token_id],
-    )
+    best_token = None
+    best_logit = float("-inf")
+
+    for token_id in allowed_tokens:
+        if logits[token_id] > best_logit:
+            best_logit = logits[token_id]
+            best_token = token_id
+
+    return best_token
 
 
 def constrained_generate(
