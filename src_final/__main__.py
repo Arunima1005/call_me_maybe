@@ -108,10 +108,34 @@ def generate_tokens(
             input_ids
         )
 
+        # print()
+        # print(f"State: {type(state).__name__}")
+
+        # # Show the 50 highest-scoring tokens from the LLM
+        # top_token_ids = sorted(
+        #     range(len(logits)),
+        #     key=lambda token_id: logits[token_id],
+        #     reverse=True,
+        # )[:5]
+
+        # print("Top 50 LLM predictions:")
+
+        # for rank, token_id in enumerate(top_token_ids):
+        #     token_text = model.decode([token_id])
+
+        #     print(
+        #         f"{rank + 1:2}: "
+        #         f"token_id={token_id:<6} "
+        #         f"logit={logits[token_id]:.4f} "
+        #         f"text={token_text!r}"
+        #     )
+        
         highest_token_id = highest_allowed_tokens(
             logits,
             allowed_tokens,
         )
+        # print()
+        # print(f"highest = {model.decode(highest_token_id)}")
 
         input_ids.append(highest_token_id)
         generated.append(highest_token_id)
@@ -272,15 +296,21 @@ def main():
     )
     function_tokens_sequence = tokenize_function_names(model,functions,)
     # user_prompt = "What is the sum of 25 and 89?"
-    user_prompt = "What is the sum of -25 and 89?"
+    # user_prompt = "What is the sum of -25 and 89?"
+    # user_prompt = "What is the sum of 265 and 345?"
     # user_prompt = "What is the square root of 16?"
     # user_prompt = "Calculate the square root of 144"
-    # user_prompt = "Reverse the string 'world'"
+    user_prompt = "Reverse the string 'world'"
     # user_prompt = "Replace all numbers in \"Hello 34 I'm 233 years old\" with NUMBERS"
     # user_prompt = "Greet shrek"
 
     # user_prompt = "Replace all vowels in 'Programming is fun' with asterisks"
      # user_prompt = "Substitute the word 'cat' with 'dog' in 'The cat sat on the mat with another cat'"
+
+    # user_prompt = "Set my age to 25"
+    # user_prompt = "Turn on notification alerts"
+    # user_prompt = "Disable all notifications"
+    # user_prompt = "Lower the thermostat temperature by -5 degrees and force apply it immediately"
 
     function_prompt = build_function_prompt(
         user_prompt,
@@ -317,13 +347,13 @@ def main():
     print("---------")
     print(model.decode(generated))
 
-    print("\nSELECTED FUNCTION")
-    print("-----------------")
-    print(context.selected_function)
+    # print("\nSELECTED FUNCTION")
+    # print("-----------------")
+    # print(context.selected_function)
 
-    print("\nPARAMETER VALUES")
-    print("----------------")
-    print(context.parameter_values)
+    # print("\nPARAMETER VALUES")
+    # print("----------------")
+    # print(context.parameter_values)
 
     result = build_result(
     user_prompt,

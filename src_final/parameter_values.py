@@ -4,10 +4,18 @@ from abc import ABC, abstractmethod
 
 class ParameterValueRule(ABC):
 
+    _token_text_cache: dict[int, str] = {}
+
     def __init__(self, model, vocabulary):
         self.model = model
         self.vocabulary = vocabulary
         self.token_ids: list[int] = []
+
+    def _get_token_text(self, token_id: int) -> str:
+        if token_id not in self._token_text_cache:
+            self._token_text_cache[token_id] = self.model.decode([token_id])
+
+        return self._token_text_cache[token_id]
 
     @abstractmethod
     def get_allowed_tokens(self) -> set[int]:
@@ -41,7 +49,9 @@ class NumberParameterRule(ParameterValueRule):
         current_value = self.get_value()
 
         for token_id in range(len(self.vocabulary)):
-            token_text = self.model.decode([token_id])
+            # token_text = self.model.decode([token_id])
+            token_text = self._get_token_text(token_id)
+
 
             if not token_text:
                 continue
@@ -113,58 +123,7 @@ class StringParameterRule(ParameterValueRule):
         val = self.get_value()
         return not any(char in val for char in [",", ")", "(", ":", "\n"])
 
-
-# class StringParameterRule(ParameterValueRule):
-
-#     def get_value(self) -> str:
-#         raw = self.model.decode(self.token_ids).strip()
-#         if (raw.startswith('"') and raw.endswith('"')) or (
-#             raw.startswith("'") and raw.endswith("'")
-#         ):
-#             raw = raw[1:-1]
-#         return raw.strip(' "\'')
-
-#     def get_allowed_tokens(self) -> set[int]:
-#         allowed = set()
-#         decoded = self.model.decode(self.token_ids)
-#         is_quoted = decoded.startswith('"') or decoded.startswith("'")
-
-#         for token_id in range(len(self.vocabulary)):
-#             token_text = self.model.decode([token_id])
-
-#             if not token_text:
-#                 continue
-
-#             # Prevent newlines inside standard string values
-#             if "\n" in token_text or "\r" in token_text:
-#                 continue
-
-#             if is_quoted:
-#                 # Prevent matching the same opening quote to close prematurely
-#                 if token_text == decoded[0]:
-#                     continue
-#             else:
-#                 # Block structural markers when unquoted
-#                 if any(char in token_text for char in [",", ")", "(", ":"]):
-#                     continue
-
-#             allowed.add(token_id)
-
-#         # Safeguard fallback to avoid deadlocks
-#         if not allowed:
-#             for token_id in range(len(self.vocabulary)):
-#                 t = self.model.decode([token_id])
-#                 if t and "\n" not in t and "\r" not in t:
-#                     allowed.add(token_id)
-
-#         return allowed
-
-#     def can_finish(self) -> bool:
-#         return len(self.get_value()) > 0
-
-#     def validate(self) -> bool:
-#         return True
-
+        
 class IntegerParameterRule(ParameterValueRule):
 
     def get_value(self) -> str:
@@ -175,7 +134,9 @@ class IntegerParameterRule(ParameterValueRule):
         current_value = self.get_value()
 
         for token_id in range(len(self.vocabulary)):
-            token_text = self.model.decode([token_id])
+            # token_text = self.model.decode([token_id])
+            token_text = self._get_token_text(token_id)
+
 
             if not token_text:
                 continue
@@ -253,7 +214,9 @@ class BooleanParameterRule(ParameterValueRule):
             return set()
 
         for token_id in range(len(self.vocabulary)):
-            token_text = self.model.decode([token_id])
+            # token_text = self.model.decode([token_id])
+            token_text = self._get_token_text(token_id)
+
 
             if not token_text:
                 continue
