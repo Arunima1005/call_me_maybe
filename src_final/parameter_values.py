@@ -25,17 +25,43 @@ def guess_regex_from_prompt(prompt: str) -> str | None:
             return COMMON_REGEX_SYNONYMS[word]
     return None
 
+# def extract_literal_candidates(prompt: str) -> list[str]:
+#     """
+#     Extract literal values from the prompt, in order of appearance:
+#     quoted spans (single or double), plus a trailing unquoted word/phrase
+#     after 'with' (covers '... with asterisks', '... with NUMBERS').
+#     """
+#     candidates: list[tuple[int, str]] = []
+
+#     for match in re.finditer(r"'([^']*)'|\"([^\"]*)\"", prompt):
+#         value = match.group(1) if match.group(1) is not None else match.group(2)
+#         candidates.append((match.start(), value))
+
+#     trailing = re.search(r"\bwith\s+([A-Za-z0-9_]+)\s*$", prompt)
+#     if trailing and not any(v == trailing.group(1) for _, v in candidates):
+#         candidates.append((trailing.start(1), trailing.group(1)))
+
+#     candidates.sort(key=lambda pair: pair[0])
+#     return [value for _, value in candidates]
+
+
 def extract_literal_candidates(prompt: str) -> list[str]:
-    """
-    Extract literal values from the prompt, in order of appearance:
-    quoted spans (single or double), plus a trailing unquoted word/phrase
-    after 'with' (covers '... with asterisks', '... with NUMBERS').
-    """
     candidates: list[tuple[int, str]] = []
 
     for match in re.finditer(r"'([^']*)'|\"([^\"]*)\"", prompt):
         value = match.group(1) if match.group(1) is not None else match.group(2)
         candidates.append((match.start(), value))
+
+    # Unix (/a/b) or Windows (C:\a\b) file paths
+    for match in re.finditer(r"(?:[A-Za-z]:\\[^\s,]+|/[^\s,]+)", prompt):
+        value = match.group(0)
+        if not any(value == v for _, v in candidates):
+            candidates.append((match.start(), value))
+
+    # "with <value> encoding" — capture just the value, not the trailing word
+    encoding_match = re.search(r"\bwith\s+([\w.\-]+)\s+encoding\b", prompt, re.IGNORECASE)
+    if encoding_match and not any(v == encoding_match.group(1) for _, v in candidates):
+        candidates.append((encoding_match.start(1), encoding_match.group(1)))
 
     trailing = re.search(r"\bwith\s+([A-Za-z0-9_]+)\s*$", prompt)
     if trailing and not any(v == trailing.group(1) for _, v in candidates):
@@ -44,18 +70,58 @@ def extract_literal_candidates(prompt: str) -> list[str]:
     candidates.sort(key=lambda pair: pair[0])
     return [value for _, value in candidates]
 
+# def assign_string_targets(context) -> dict[str, str]:
+#     """
+#     Maps each non-synthesized string parameter to a literal extracted from
+#     the prompt. Heuristic: the single LONGEST literal is the "operate on
+#     this text" parameter (first such param in the function's signature —
+#     e.g. source_string). Any remaining literal is filled from the END of
+#     what's left into subsequent params (e.g. replacement), since prompts
+#     naturally state '... X ... with Y' — Y is mentioned last. Params that
+#     get no match fall back to free generation.
+#     """
+#     candidates = list(context.literal_candidates)
+#     parameter_names = list(context.selected_function.parameters)
+
+#     non_regex_string_params = [
+#         name for name in parameter_names
+#         if context.selected_function.parameters[name]["type"] == "string"
+#         and name.lower() not in ParameterValueFactory.SYNTHESIZED_STRING_PARAMS
+#     ]
+
+#     assignment: dict[str, str] = {}
+#     if not non_regex_string_params or not candidates:
+#         return assignment
+
+#     remaining = candidates[:]
+
+#     primary_param = non_regex_string_params[0]
+#     longest_index = max(range(len(remaining)), key=lambda i: len(remaining[i]))
+#     assignment[primary_param] = remaining.pop(longest_index)
+
+#     for name in reversed(non_regex_string_params[1:]):
+#         if not remaining:
+#             break
+#         assignment[name] = remaining.pop()
+
+#     return assignment
+
+
+def extract_colon_suffix(prompt: str) -> str | None:
+    """
+    Everything after the first ':' in the prompt, trimmed. For single-
+    string-param functions (e.g. fn_format_template) the whole remainder —
+    including any quotes/braces it contains — IS the literal value, not a
+    fragment carved out by quote-matching.
+    """
+    match = re.search(r":\s*(.+)$", prompt)
+    if not match:
+        return None
+    value = match.group(1).strip()
+    return value or None
+
 
 def assign_string_targets(context) -> dict[str, str]:
-    """
-    Maps each non-synthesized string parameter to a literal extracted from
-    the prompt. Heuristic: the single LONGEST literal is the "operate on
-    this text" parameter (first such param in the function's signature —
-    e.g. source_string). Any remaining literal is filled from the END of
-    what's left into subsequent params (e.g. replacement), since prompts
-    naturally state '... X ... with Y' — Y is mentioned last. Params that
-    get no match fall back to free generation.
-    """
-    candidates = list(context.literal_candidates)
     parameter_names = list(context.selected_function.parameters)
 
     non_regex_string_params = [
@@ -65,7 +131,19 @@ def assign_string_targets(context) -> dict[str, str]:
     ]
 
     assignment: dict[str, str] = {}
-    if not non_regex_string_params or not candidates:
+    if not non_regex_string_params:
+        return assignment
+
+    if len(non_regex_string_params) == 1:
+        only_param = non_regex_string_params[0]
+        colon_value = extract_colon_suffix(context.user_prompt)
+        if colon_value:
+            assignment[only_param] = colon_value
+            return assignment
+        # no colon in prompt — fall through to normal candidate logic below
+
+    candidates = list(context.literal_candidates)
+    if not candidates:
         return assignment
 
     remaining = candidates[:]
@@ -80,7 +158,6 @@ def assign_string_targets(context) -> dict[str, str]:
         assignment[name] = remaining.pop()
 
     return assignment
-
 
 def guess_replacement_from_prompt(prompt: str) -> str | None:
     words = re.findall(r"[a-zA-Z]+", prompt.lower())

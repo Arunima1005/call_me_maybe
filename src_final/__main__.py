@@ -1,11 +1,11 @@
-import json
+import json, argparse
 import time
 from pathlib import Path
-from data_models import Function_definition, GenerationContext
+from .data_models import Function_definition, GenerationContext
 from llm_sdk.llm_sdk import Small_LLM_Model
-from generation_state import GenerationState, ParameterValueState, FunctionNameState, ParameterValueSeparatorState, ParametersState, ParameterNameState
+from .generation_state import GenerationState, ParameterValueState, FunctionNameState, ParameterValueSeparatorState, ParametersState, ParameterNameState
 
-from parameter_values import extract_literal_candidates
+from .parameter_values import extract_literal_candidates
 
 
 RED = "\033[91m"
@@ -233,11 +233,40 @@ def build_result(
 def main():
     total_start_time = time.perf_counter()
 
-    input_function_path = Path("data/input/functions_definition.json")
-    
-    input_user_prompt_path = Path("data/input/function_calling_tests.json")
+    parser = argparse.ArgumentParser()
 
-    output_path = Path("data/output/function_calling_results.json")
+    parser.add_argument(
+    "-f",
+    "--functions",
+    default="data/input/functions_definition.json",
+    help="Path to functions definition JSON",
+)
+
+    parser.add_argument(
+        "-i",
+        "--input",
+        default="data/input/function_calling_tests.json",
+        help="Path to user prompts JSON",
+    )
+
+    parser.add_argument(
+        "-o",
+        "--output",
+        default="data/output/function_calling_results.json",
+        help="Path to output JSON",
+    )
+
+    args = parser.parse_args()
+
+    input_function_path = Path(args.functions)
+    input_user_prompt_path = Path(args.input)
+    output_path = Path(args.output)
+
+    # input_function_path = Path("data/input/functions_definition.json")
+    
+    # input_user_prompt_path = Path("data/input/function_calling_tests.json")
+
+    # output_path = Path("data/output/function_calling_results.json")
 
     functions = load_functions(input_function_path)
 

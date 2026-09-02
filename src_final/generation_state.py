@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
-from data_models import Function_definition, GenerationContext
-from parameter_values import StringParameterRule, ParameterValueFactory, guess_regex_from_prompt, guess_replacement_from_prompt, assign_string_targets
+from .data_models import Function_definition, GenerationContext
+from .parameter_values import StringParameterRule, ParameterValueFactory, guess_regex_from_prompt, guess_replacement_from_prompt, assign_string_targets
 # from src_final.parameter_values_old import StringParameterRule, guess_regex_from_prompt, assign_string_targets
 
 class GenerationState(ABC):
