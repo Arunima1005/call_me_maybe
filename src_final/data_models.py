@@ -21,3 +21,6 @@ class GenerationContext(BaseModel):
     selected_function: Function_definition | None = None
     current_parameter_index: int = 0
     parameter_values: dict[str, object] = {}
+
+    literal_candidates: list[str] = [] 
+    user_prompt: str = "" 

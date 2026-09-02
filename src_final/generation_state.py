@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from data_models import Function_definition, GenerationContext
-from src_final.parameter_values import ParameterValueFactory
+from parameter_values import StringParameterRule, ParameterValueFactory, guess_regex_from_prompt, guess_replacement_from_prompt, assign_string_targets
+# from src_final.parameter_values_old import StringParameterRule, guess_regex_from_prompt, assign_string_targets
 
 class GenerationState(ABC):
 
@@ -147,162 +148,6 @@ class ParameterValueSeparatorState(GenerationState):
             self.context,
         )
 
-# class ParameterValueState(GenerationState):
-
-#     def __init__(self, context: GenerationContext):
-#         super().__init__(context)
-
-#         parameter_name = list(
-#             self.context.selected_function.parameters
-#         )[self.context.current_parameter_index]
-
-#         parameter_type = (
-#             self.context.selected_function.parameters[
-#                 parameter_name
-#             ]["type"]
-#         )
-
-#         self.value_rule = ParameterValueFactory.build(
-#             parameter_type,
-#             self.context.model,
-#             self.context.vocabulary,
-#         )
-
-#     # def get_allowed(self) -> set[int]:
-
-#     #     # Always allow tokens that can continue the value.
-#     #     allowed = self.value_rule.get_allowed_tokens()
-
-#     #     # Only allow , or ) AFTER we have a complete value.
-#     #     if self.value_rule.can_finish():
-
-#     #         if (
-#     #             self.context.current_parameter_index + 1
-#     #             < len(
-#     #                 self.context.selected_function.parameters
-#     #             )
-#     #         ):
-#     #             allowed.add(
-#     #                 self.context.parameter_separator_token
-#     #             )
-#     #         else:
-#     #             allowed.add(
-#     #                 self.context.close_parameter_token
-#     #             )
-
-#     #     return allowed
-
-#     def get_allowed(self) -> set[int]:
-#         allowed = set(self.value_rule.get_allowed_tokens())
-
-#         if self.value_rule.can_finish():
-#             num_params = len(self.context.selected_function.parameters)
-#             has_more_params = (self.context.current_parameter_index + 1) < num_params
-
-#             if has_more_params:
-#                 allowed.add(self.context.parameter_separator_token)
-#             else:
-#                 allowed.add(self.context.close_parameter_token)
-
-#         # Safety Fallback: ensure execution doesn't stall if allowed set is empty
-#         if not allowed:
-#             num_params = len(self.context.selected_function.parameters)
-#             if (self.context.current_parameter_index + 1) < num_params:
-#                 allowed.add(self.context.parameter_separator_token)
-#             else:
-#                 allowed.add(self.context.close_parameter_token)
-
-#         return allowed
-
-    
-#     def add_token(self, token_id: int) -> None:
-
-#         # Structural token: do not add it to the value.
-#         if self.is_termination_token(token_id):
-#             return
-
-#         self.value_rule.add_token(token_id)
-
-#         if not self.value_rule.validate():
-#             raise ValueError(
-#                 f"Invalid parameter value: "
-#                 f"{self.value_rule.get_value()}"
-#             )
-
-#     def is_complete(self) -> bool:
-#         """
-#         A value is complete when the value rule says
-#         the current value is valid.
-
-#         For example:
-#             "2"  -> complete
-#             "25" -> complete
-#             "89" -> complete
-#         """
-
-#         return self.value_rule.can_finish()
-
-#     def should_transition(self, token_id: int) -> bool:
-#         """
-#         We transition ONLY when the model generates
-#         the structural token ',' or ')'.
-#         """
-
-#         return self.is_termination_token(token_id)
-
-#     def is_termination_token(self, token_id: int) -> bool:
-
-#         # Cannot terminate an empty/invalid value.
-#         if not self.value_rule.can_finish():
-#             return False
-
-#         # More parameters -> comma terminates this value.
-#         if (
-#             self.context.current_parameter_index + 1
-#             < len(
-#                 self.context.selected_function.parameters
-#             )
-#         ):
-#             return (
-#                 token_id
-#                 == self.context.parameter_separator_token
-#             )
-
-#         # Last parameter -> ')' terminates this value.
-#         return (
-#             token_id
-#             == self.context.close_parameter_token
-#         )
-
-#     def get_value(self) -> str:
-#         return self.value_rule.get_value()
-
-#     def next_state(self) -> GenerationState:
-
-#         parameter_name = list(
-#             self.context.selected_function.parameters
-#         )[self.context.current_parameter_index]
-
-#         # Save the extracted value.
-#         self.context.parameter_values[
-#             parameter_name
-#         ] = self.get_value()
-
-#         # More parameters remain.
-#         if (
-#             self.context.current_parameter_index + 1
-#             < len(
-#                 self.context.selected_function.parameters
-#             )
-#         ):
-#             self.context.current_parameter_index += 1
-
-#             return ParameterNameState(
-#                 self.context
-#             )
-
-#         # Last parameter is finished.
-#         return None
 
 class ParameterValueState(GenerationState):
 
@@ -319,13 +164,34 @@ class ParameterValueState(GenerationState):
             ]["type"]
         )
 
-        self.value_rule = ParameterValueFactory.build(
-            parameter_type,
-            self.context.model,
-            self.context.vocabulary,
-        )
+        target = None
+        if parameter_type == "string":
+            if parameter_name.lower() in ParameterValueFactory.SYNTHESIZED_STRING_PARAMS:
+                # Known keyword -> exact, guaranteed-correct regex.
+                # Falls through to free model synthesis only when the
+                # prompt doesn't match a known category (e.g. 'cat').
+                target = guess_regex_from_prompt(self.context.user_prompt)
+            elif parameter_name.lower() == "replacement":
+                target = guess_replacement_from_prompt(self.context.user_prompt) \
+             or assign_string_targets(self.context).get(parameter_name)
+            else:
+                target = assign_string_targets(self.context).get(parameter_name)
 
+        if parameter_type == "string" and target is not None:
+                self.value_rule = StringParameterRule(
+                    self.context.model, self.context.vocabulary,
+                    target=target, mode="exact",
+                )
+        else:
+                self.value_rule = ParameterValueFactory.build(
+                    parameter_type,
+                    self.context.model,
+                    self.context.vocabulary,
+                    target=target,
+                    parameter_name=parameter_name,
+                )
     def get_allowed(self) -> set[int]:
+
         allowed = set(self.value_rule.get_allowed_tokens())
 
         if self.value_rule.can_finish():

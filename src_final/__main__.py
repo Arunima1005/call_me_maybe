@@ -1,14 +1,41 @@
 import json
+import time
 from pathlib import Path
 from data_models import Function_definition, GenerationContext
 from llm_sdk.llm_sdk import Small_LLM_Model
 from generation_state import GenerationState, ParameterValueState, FunctionNameState, ParameterValueSeparatorState, ParametersState, ParameterNameState
 
+from parameter_values import extract_literal_candidates
+
+
+RED = "\033[91m"
+RESET = "\033[0m"
+CYAN = "\033[96m"
+GREEN = "\033[92m"
+YELLOW = "\033[93m"
+BOLD = "\033[1m"
+
+
 def load_functions(path: Path) -> list[Function_definition]:
+    if not path.is_file():
+        print(RED + f"ERROR: Functions file not found: {path}" + RESET)
+        # show_error_message(f"Functions file not found: {path}")
+        raise SystemExit(1)
+        
     with path.open() as file:
         functions = json.load(file)
 
     return [Function_definition(**function) for function in functions]
+
+def load_user_prompts(path: Path) -> list[str]:
+    if not path.is_file():
+        print(RED + f"ERROR: User prompts file not found: {path}" + RESET)
+        raise SystemExit(1)
+
+    with path.open() as file:
+        user_prompts = json.load(file)
+
+    return [prompt["prompt"] for prompt in user_prompts]
 
 def get_tokens(
           model: Small_LLM_Model, text: str,) -> list[int]:
@@ -17,17 +44,6 @@ def get_tokens(
         return model.encode(
             text
         )[0].tolist()
-
-# def build_function_prompt(user_prompt: str, functions: list[Function_definition]) -> str:
-#     prompt = [f"{function.name}: {function.description}" for function in functions]
-#     prompt.extend([
-#                 "",
-#                 "User prompt:",
-#                 user_prompt,
-#                 "",
-#                 "Function:",
-#             ])
-#     return "\n".join(prompt)
 
 def build_function_prompt(
     user_prompt: str,
@@ -40,6 +56,20 @@ def build_function_prompt(
         "Use the exact values mentioned by the user.",
         "",
     ]
+
+    # prompt = [
+    #     "Select the function that best matches the user request.",
+    #     "Then generate the function call using the values from the user request, preserving negative signs.",
+    #     "Use the exact values mentioned by the user.",
+    #     "When a parameter needs a regex pattern, write a real regex (e.g. \\d+ for numbers, "
+    #     "[aeiouAEIOU] for vowels, [^a-zA-Z0-9] for punctuation) — never copy a word from the prompt "
+    #     "into a regex parameter.",
+    #     "",
+    #     "Example:",
+    #     "User prompt: Replace all digits in 'a1b2' with X",
+    #     "Function call: fn_substitute_string_with_regex(source_string:a1b2,regex:\\d+,replacement:X)",
+    #     "",
+    # ]
 
     for function in functions:
         prompt.append(
@@ -86,105 +116,46 @@ def highest_allowed_tokens(
             highest_token_id = token_id
     return highest_token_id
 
+
 def generate_tokens(
     model: Small_LLM_Model,
     input_ids: list[int],
     state: GenerationState,
+    max_tokens: int = 200,
 ) -> list[int]:
 
     generated: list[int] = []
 
     while state is not None:
 
+        if len(generated) >= max_tokens:
+            raise RuntimeError(
+                f"Generation exceeded {max_tokens} tokens without completing "
+                f"(stuck in {type(state).__name__}); "
+                f"partial output: {model.decode(generated)!r}"
+            )
+
         allowed_tokens = state.get_allowed()
 
         if not allowed_tokens:
             raise RuntimeError(
-                f"No allowed tokens for "
-                f"{type(state).__name__}"
+                f"No allowed tokens for {type(state).__name__}"
             )
 
-        logits = model.get_logits_from_input_ids(
-            input_ids
-        )
-
-        # print()
-        # print(f"State: {type(state).__name__}")
-
-        # # Show the 50 highest-scoring tokens from the LLM
-        # top_token_ids = sorted(
-        #     range(len(logits)),
-        #     key=lambda token_id: logits[token_id],
-        #     reverse=True,
-        # )[:5]
-
-        # print("Top 50 LLM predictions:")
-
-        # for rank, token_id in enumerate(top_token_ids):
-        #     token_text = model.decode([token_id])
-
-        #     print(
-        #         f"{rank + 1:2}: "
-        #         f"token_id={token_id:<6} "
-        #         f"logit={logits[token_id]:.4f} "
-        #         f"text={token_text!r}"
-        #     )
-        
-        highest_token_id = highest_allowed_tokens(
-            logits,
-            allowed_tokens,
-        )
-        # print()
-        # print(f"highest = {model.decode(highest_token_id)}")
+        logits = model.get_logits_from_input_ids(input_ids)
+        highest_token_id = highest_allowed_tokens(logits, allowed_tokens)
 
         input_ids.append(highest_token_id)
         generated.append(highest_token_id)
 
         state.add_token(highest_token_id)
 
-        if state.should_transition(
-            highest_token_id
-        ):
+        if state.should_transition(highest_token_id):
             state = state.next_state()
-
             if state is None:
                 break
 
     return generated
-
-# def generate_tokens(
-#     model: Small_LLM_Model,
-#     input_ids: list[int],
-#     state: GenerationState,
-#     max_tokens: int = 150,
-# ) -> list[int]:
-#     generated_tokens: list[int] = []
-
-#     for _ in range(max_tokens):
-#         if state is None:
-#             break
-
-#         allowed_tokens = state.get_allowed()
-
-#         if not allowed_tokens:
-#             raise RuntimeError(
-#                 f"No allowed tokens for state {type(state).__name__}"
-#             )
-
-#         logits = model.get_logits_from_input_ids(input_ids)
-#         next_token_id = highest_allowed_tokens(logits, allowed_tokens)
-
-#         input_ids.append(next_token_id)
-#         generated_tokens.append(next_token_id)
-
-#         # Update state history with generated token
-#         state.add_token(next_token_id)
-
-#         # Check for state transition
-#         if state.should_transition(next_token_id):
-#             state = state.next_state()
-
-#     return generated_tokens
 
 
 def load_vocabulary(
@@ -204,7 +175,6 @@ def load_vocabulary(
         result[token_id] = token_text
 
     return result
-    # return list(vocabulary.keys())
 
 def convert_value(
     value: str,
@@ -259,120 +229,132 @@ def build_result(
         "parameters": parameters,
     }
 
-def save_result(
-    result: dict,
-    path: Path,
-) -> None:
-
-    path.parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    results = []
-    if path.exists() and path.stat().st_size > 0:
-        try:
-            results = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            results = []
-
-    results.append(result)
-
-    path.write_text(
-        json.dumps(
-            results,
-            indent=4,
-        ),
-        encoding="utf-8",
-    )
 
 def main():
+    total_start_time = time.perf_counter()
+
+    input_function_path = Path("data/input/functions_definition.json")
+    
+    input_user_prompt_path = Path("data/input/function_calling_tests.json")
+
+    output_path = Path("data/output/function_calling_results.json")
+
+    functions = load_functions(input_function_path)
+
+    user_prompts = load_user_prompts(input_user_prompt_path)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
     model = Small_LLM_Model(
-        "Qwen/Qwen2.5-0.5B-Instruct"
-    )
-
-    functions = load_functions(
-        Path("data/input/functions_definition.json")
-    )
-    function_tokens_sequence = tokenize_function_names(model,functions,)
-    # user_prompt = "What is the sum of 25 and 89?"
-    # user_prompt = "What is the sum of -25 and 89?"
-    # user_prompt = "What is the sum of 265 and 345?"
-    # user_prompt = "What is the square root of 16?"
-    # user_prompt = "Calculate the square root of 144"
-    user_prompt = "Reverse the string 'world'"
-    # user_prompt = "Replace all numbers in \"Hello 34 I'm 233 years old\" with NUMBERS"
-    # user_prompt = "Greet shrek"
-
-    # user_prompt = "Replace all vowels in 'Programming is fun' with asterisks"
-     # user_prompt = "Substitute the word 'cat' with 'dog' in 'The cat sat on the mat with another cat'"
-
-    # user_prompt = "Set my age to 25"
-    # user_prompt = "Turn on notification alerts"
-    # user_prompt = "Disable all notifications"
-    # user_prompt = "Lower the thermostat temperature by -5 degrees and force apply it immediately"
-
-    function_prompt = build_function_prompt(
-        user_prompt,
-        functions,
-    )
-
-    print(function_prompt)
-
-    input_ids = get_tokens(
-        model,
-        function_prompt,
-    )
-
-    context = GenerationContext(
-        functions=functions,
-        function_token_sequences=function_tokens_sequence,
-        model=model,
-        open_parameter_token = get_tokens(model, "(")[0],
-        key_value_separator_token= get_tokens(model, ":")[0],
-        parameter_separator_token= get_tokens(model, ",")[0],
-        close_parameter_token= get_tokens(model, ")")[0],
-        vocabulary=load_vocabulary(model),
-    )
-
-    state = FunctionNameState(context)
-
-    generated = generate_tokens(
-        model,
-        input_ids,
-        state,
-    )
-
-    print("\nGENERATED")
-    print("---------")
-    print(model.decode(generated))
-
-    # print("\nSELECTED FUNCTION")
-    # print("-----------------")
-    # print(context.selected_function)
-
-    # print("\nPARAMETER VALUES")
-    # print("----------------")
-    # print(context.parameter_values)
-
-    result = build_result(
-    user_prompt,
-    context,
-)
-
-    save_result(
-        result,
-        Path(
-            "data/output/function_calling_results.json"
-        ),
-    )
-
-    print(
-        json.dumps(
-            result,
-            indent=4,
+            "Qwen/Qwen2.5-0.5B-Instruct"
         )
+
+    function_tokens_sequence = tokenize_function_names(model,functions,)
+
+    results = []
+    total_prompts = len(user_prompts)
+    width = 100
+    print()
+    print(CYAN + "=" * width + RESET)
+    print(BOLD + "   CALL ME MAYBE   -     FUNCTION CALLING TEST RUN".center(width) + RESET)
+    print(CYAN + "=" * width + RESET)
+    print(f"{CYAN}Model   : {RESET}Qwen/Qwen2.5-0.5B-Instruct")
+    print(f"{CYAN}Prompts : {RESET}{total_prompts}")
+    print(CYAN+ "=" * width + RESET)
+
+    for index, user_prompt in enumerate(user_prompts, start = 1):
+
+        promt_start_time = time.perf_counter()
+
+        print()
+        print(CYAN + "┌" + "─" * (width - 2) + "┐" + RESET)
+        print(CYAN+ f"│ PROMPT {index}/{total_prompts}".ljust(width - 1) + "│" + RESET)
+        print(CYAN + "├" + "─" * (width - 2) + "┤" + RESET)
+        print(CYAN + f"│ {user_prompt}".ljust((width - 1)) + "│" + RESET)
+        print(CYAN + "└" + "─" * (width - 2) + "┘" + RESET)
+
+        function_prompt = build_function_prompt(
+            user_prompt,
+            functions,
+        )
+        print()
+        print(BOLD + CYAN+ f"System Prompt:" + RESET)
+        print(BOLD + CYAN + "=" * width + RESET)
+        for line in function_prompt.splitlines():
+            print(BOLD + "    " + line + RESET)
+        print(BOLD + CYAN + "=" * width + RESET)
+        print()
+        input_ids = get_tokens(
+            model,
+            function_prompt,
+        )
+
+        literal_candidates = extract_literal_candidates(user_prompt)
+
+        context = GenerationContext(
+            functions=functions,
+            function_token_sequences=function_tokens_sequence,
+            model=model,
+            open_parameter_token = get_tokens(model, "(")[0],
+            key_value_separator_token= get_tokens(model, ":")[0],
+            parameter_separator_token= get_tokens(model, ",")[0],
+            close_parameter_token= get_tokens(model, ")")[0],
+            vocabulary=load_vocabulary(model),
+            literal_candidates=literal_candidates,
+            user_prompt=user_prompt,   
+        )
+
+        state = FunctionNameState(context)
+
+        generated = generate_tokens(
+            model,
+            input_ids,
+            state,
+        )
+
+        result = build_result(
+        user_prompt,
+        context,)
+
+        results.append(result)
+        output_path.write_text(
+            json.dumps(results, indent=4),
+            encoding="utf-8",
+        )
+
+        prompt_execution_time = (time.perf_counter() - promt_start_time)
+
+        print()
+        print(GREEN + "GENERATED" + RESET)
+        print(GREEN + "  ✓ FUNCTION" + RESET)
+        print(f"    {result['name']}")
+
+        print()
+        print(GREEN + "  ✓ PARAMETERS" + RESET)
+
+        if result["parameters"]:
+            for name, value in result["parameters"].items():
+                print(f"    {name} = {value!r}")
+        else:
+            print("    None")
+
+        print()
+        print(YELLOW + f"  Execution time: {prompt_execution_time:.3f} seconds" + RESET)
+
+    total_execution_time = (
+        time.perf_counter() - total_start_time
     )
+
+    print()
+    print(GREEN + "=" * width + RESET)
+    print(BOLD + "                    TEST RUN COMPLETE" + RESET)
+    print(GREEN + "=" * width + RESET)
+    print(f"  Prompts executed : {total_prompts}")
+    print(f"  Results saved    : {len(results)}")
+    print(f"  Total time       : {total_execution_time:.3f} seconds")
+    print(f"  Output file      : {output_path}")
+    print(GREEN + "=" * width + RESET)
+
     
 if __name__=="__main__":
     main()

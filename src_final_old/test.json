@@ -1,0 +1,54 @@
+[
+    {
+        "name": "fn_set_user_age",
+        "description": "Set the user's age in years.",
+        "parameters": {
+            "age": {
+                "type": "integer"
+            }
+        },
+        "returns": {
+            "type": "boolean"
+        }
+    },
+    {
+        "name": "fn_toggle_notifications",
+        "description": "Enable or disable user notification alerts.",
+        "parameters": {
+            "enabled": {
+                "type": "boolean"
+            }
+        },
+        "returns": {
+            "type": "boolean"
+        }
+    },
+    {
+        "name": "fn_adjust_temperature",
+        "description": "Adjust thermostat temperature by a specific integer offset.",
+        "parameters": {
+            "offset": {
+                "type": "integer"
+            },
+            "force_apply": {
+                "type": "boolean"
+            }
+        },
+        "returns": {
+            "type": "string"
+        }
+    },
+
+    {
+        "prompt": "Set my age to 25"
+    },
+    {
+        "prompt": "Turn on notification alerts"
+    },
+    {
+        "prompt": "Disable all notifications"
+    },
+    {
+        "prompt": "Lower the thermostat temperature by -5 degrees and force apply it immediately"
+    }
+]
