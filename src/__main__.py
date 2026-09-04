@@ -256,6 +256,14 @@ def main():
         help="Path to output JSON",
     )
 
+    parser.add_argument(
+            "-m",
+            "--model",
+            default="Qwen/Qwen2.5-0.5B-Instruct",
+            help="Hugging Face model name",
+        )
+    
+
     args = parser.parse_args()
 
     input_function_path = Path(args.functions)
@@ -274,9 +282,7 @@ def main():
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    model = Small_LLM_Model(
-            "Qwen/Qwen2.5-0.5B-Instruct"
-        )
+    model = Small_LLM_Model(args.model)
 
     function_tokens_sequence = tokenize_function_names(model,functions,)
 
@@ -287,7 +293,7 @@ def main():
     print(CYAN + "=" * width + RESET)
     print(BOLD + "   CALL ME MAYBE   -     FUNCTION CALLING TEST RUN".center(width) + RESET)
     print(CYAN + "=" * width + RESET)
-    print(f"{CYAN}Model   : {RESET}Qwen/Qwen2.5-0.5B-Instruct")
+    print(f"{CYAN}Model   : {RESET}{args.model}")
     print(f"{CYAN}Prompts : {RESET}{total_prompts}")
     print(CYAN+ "=" * width + RESET)
 
@@ -306,13 +312,13 @@ def main():
             user_prompt,
             functions,
         )
-        print()
-        print(BOLD + CYAN+ f"System Prompt:" + RESET)
-        print(BOLD + CYAN + "=" * width + RESET)
-        for line in function_prompt.splitlines():
-            print(BOLD + "    " + line + RESET)
-        print(BOLD + CYAN + "=" * width + RESET)
-        print()
+        # print()
+        # print(BOLD + CYAN+ f"System Prompt:" + RESET)
+        # print(BOLD + CYAN + "=" * width + RESET)
+        # for line in function_prompt.splitlines():
+        #     print(BOLD + "    " + line + RESET)
+        # print(BOLD + CYAN + "=" * width + RESET)
+        # print()
         input_ids = get_tokens(
             model,
             function_prompt,

@@ -1,12 +1,18 @@
 from pydantic import BaseModel
 
 class Function_definition(BaseModel):
+    """Definition of a callable function and its parameters."""
     name: str
     description: str
     parameters : dict[str, dict[str, str]]
     returns : dict[str, str]
 
 class GenerationContext(BaseModel):
+    """Shared context used throughout constrained function-call generation.
+
+    Stores the available functions, token sequences, model information,
+    generation tokens, and the current parameter-generation state.
+    """
     functions: list[Function_definition]
     function_token_sequences: list[list[int]]
 

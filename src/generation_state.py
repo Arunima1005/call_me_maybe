@@ -1,35 +1,47 @@
 from abc import ABC, abstractmethod
 from .data_models import Function_definition, GenerationContext
 from .parameter_values import StringParameterRule, ParameterValueFactory, guess_regex_from_prompt, guess_replacement_from_prompt, assign_string_targets
-# from src_final.parameter_values_old import StringParameterRule, guess_regex_from_prompt, assign_string_targets
+
 
 class GenerationState(ABC):
+    """Base class for states in constrained function-call generation.
+
+    Each state determines which tokens are allowed and when generation
+    should transition to the next state.
+    """
 
     def __init__(self, context: GenerationContext):
+        """Initialize the state with the shared generation context."""
         self.context = context
         self.tokens: list[int] = []
 
     @abstractmethod
     def get_allowed(self) -> set[int]:
+        """Return the token IDs allowed in the current state."""
         raise NotImplementedError
 
     @abstractmethod
     def next_state(self):
+        """Return the next generation state after this state completes."""
         raise NotImplementedError
 
     def add_token(self, token_id: int) -> None:
+        """Add a generated token to the current state's token sequence."""
         self.tokens.append(token_id)
 
     def is_complete(self) -> bool:
+        """Return whether the current state has completed its generation."""
         return False
 
     def should_transition(self, token_id: int) -> bool:
+        """Return whether the generated token should trigger a state transition."""
         return self.is_complete()
 
     def _valid_tokens(
         self,
         options: list[list[int]],
     ) -> set[int]:
+        """Return tokens that continue one of the given token sequences."""
 
         allowed = set()
 
@@ -46,19 +58,23 @@ class GenerationState(ABC):
         return allowed
 
 class FunctionNameState(GenerationState):
+    """Generates a valid function name from the available functions."""
 
     def __init__(self, context: GenerationContext):
         super().__init__(context)
 
     def get_allowed(self) -> set[int]:
+        """Return tokens that can continue a valid function name."""
         return self._valid_tokens(
             self.context.function_token_sequences
         )
 
     def is_complete(self) -> bool:
+        """Return whether a complete function name has been generated."""
         return self.tokens in self.context.function_token_sequences
 
     def next_state(self) -> GenerationState:
+        """Select the generated function and move to parameter generation."""
 
         for function, tokens in zip(
             self.context.functions,
@@ -72,36 +88,43 @@ class FunctionNameState(GenerationState):
 
         raise RuntimeError("Unknown function")
 class ParametersState(GenerationState):
+    """Generates the opening parenthesis before function parameters."""
 
-    def __init__(
-        self,
-        context: GenerationContext,
-        # function: Function_definition,
-    ):
-        super().__init__(context)
-        # self.function = function
+    # def __init__(
+    #     self,
+    #     context: GenerationContext,
+    # ):
+    #     """Return the token representing the opening parenthesis."""
+    #     super().__init__(context)
+
 
     def get_allowed(self) -> set[int]:
+        """Return the token representing the opening parenthesis."""
         return {
             self.context.open_parameter_token
         }
 
     def is_complete(self) -> bool:
+        """Return whether the opening parenthesis has been generated."""
         return self.tokens == [
             self.context.open_parameter_token
         ]
 
     def next_state(self) -> GenerationState:
+        """Move to generation of the first parameter name."""
         return ParameterNameState(
             self.context,
         )
 
 class ParameterNameState(GenerationState):
+    """Generates the name of the current function parameter."""
+
 
     def __init__(
         self,
         context: GenerationContext,
     ):
+        """Initialize the state for the current parameter."""
         super().__init__(context)
 
         parameter_names = list(
@@ -117,41 +140,55 @@ class ParameterNameState(GenerationState):
         ]
 
     def get_allowed(self) -> set[int]:
+        """Return tokens that continue the current parameter name."""
         return self._valid_tokens(
             self.parameter_names
         )
 
     def is_complete(self) -> bool:
+        """Return whether the complete parameter name has been generated."""
         return self.tokens in self.parameter_names
 
     def next_state(self) -> GenerationState:
+        """Move to generation of the parameter-value separator."""
 
         return ParameterValueSeparatorState(
             self.context
         )
     
 class ParameterValueSeparatorState(GenerationState):
+    """Generates the separator between a parameter name and its value."""
+
 
     def get_allowed(self) -> set[int]:
+        """Return the token representing the key-value separator."""
         return {
             self.context.key_value_separator_token
         }
 
     def is_complete(self) -> bool:
+        """Return whether the key-value separator has been generated."""
         return self.tokens == [
             self.context.key_value_separator_token
         ]
 
     def next_state(self) -> GenerationState:
-
+        """Move to generation of the parameter value."""
         return ParameterValueState(
             self.context,
         )
 
 
 class ParameterValueState(GenerationState):
+    """Generates and validates the current parameter value.
+
+    The value-generation rule depends on the parameter type. Values can be
+    generated freely, generated using constrained rules, or reproduced
+    exactly from a value extracted from the user prompt.
+    """
 
     def __init__(self, context: GenerationContext):
+        """Create the value rule for the current parameter."""
         super().__init__(context)
 
         parameter_name = list(
@@ -191,6 +228,7 @@ class ParameterValueState(GenerationState):
                     parameter_name=parameter_name,
                 )
     def get_allowed(self) -> set[int]:
+        """Return valid value tokens and, when possible, a termination token."""
 
         allowed = set(self.value_rule.get_allowed_tokens())
 
@@ -214,8 +252,12 @@ class ParameterValueState(GenerationState):
         return allowed
 
     def add_token(self, token_id: int) -> None:
-        if self.is_termination_token(token_id):
+        """Add and validate a generated parameter-value token."""
+        if self.should_transition(token_id):
             return
+
+        # if self.is_termination_token(token_id):
+        #             return
 
         self.value_rule.add_token(token_id)
 
@@ -224,13 +266,16 @@ class ParameterValueState(GenerationState):
                 f"Invalid parameter value: {self.value_rule.get_value()}"
             )
 
-    def is_complete(self) -> bool:
-        return self.value_rule.can_finish()
+    # def is_complete(self) -> bool:
+    #     """Return whether the current parameter value can be completed."""
+    #     return self.value_rule.can_finish()
+
+    # def should_transition(self, token_id: int) -> bool:
+    #     """Return whether the generated token ends the current parameter value."""
+    #     return self.is_termination_token(token_id)
 
     def should_transition(self, token_id: int) -> bool:
-        return self.is_termination_token(token_id)
-
-    def is_termination_token(self, token_id: int) -> bool:
+        """Return whether the generated token ends the current parameter value."""
         if not self.value_rule.can_finish():
             return False
 
@@ -238,11 +283,24 @@ class ParameterValueState(GenerationState):
             return token_id == self.context.parameter_separator_token
 
         return token_id == self.context.close_parameter_token
+    
+
+    # def is_termination_token(self, token_id: int) -> bool:
+    #     """Check whether a token closes the current parameter value."""
+    #     if not self.value_rule.can_finish():
+    #         return False
+
+    #     if (self.context.current_parameter_index + 1) < len(self.context.selected_function.parameters):
+    #         return token_id == self.context.parameter_separator_token
+
+    #     return token_id == self.context.close_parameter_token
 
     def get_value(self) -> str:
+        """Return the generated parameter value as text."""
         return self.value_rule.get_value()
 
     def next_state(self) -> GenerationState:
+        """Store the current value and move to the next parameter or finish."""
         parameter_name = list(
             self.context.selected_function.parameters
         )[self.context.current_parameter_index]

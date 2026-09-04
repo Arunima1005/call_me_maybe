@@ -19,6 +19,7 @@ COMMON_REPLACEMENT_SYNONYMS = {
 }
 
 def guess_regex_from_prompt(prompt: str) -> str | None:
+    """Return a regex pattern based on a keyword found in the prompt."""
     words = re.findall(r"[a-zA-Z]+", prompt.lower())
     for word in words:
         if word in COMMON_REGEX_SYNONYMS:
@@ -46,6 +47,7 @@ def guess_regex_from_prompt(prompt: str) -> str | None:
 
 
 def extract_literal_candidates(prompt: str) -> list[str]:
+    """Extract literal values such as quoted text, file paths, and trailing values from the prompt."""
     candidates: list[tuple[int, str]] = []
 
     for match in re.finditer(r"'([^']*)'|\"([^\"]*)\"", prompt):
@@ -108,6 +110,7 @@ def extract_literal_candidates(prompt: str) -> list[str]:
 
 
 def extract_colon_suffix(prompt: str) -> str | None:
+    """Return the text appearing after the first colon in the prompt."""
     """
     Everything after the first ':' in the prompt, trimmed. For single-
     string-param functions (e.g. fn_format_template) the whole remainder —
@@ -122,6 +125,7 @@ def extract_colon_suffix(prompt: str) -> str | None:
 
 
 def assign_string_targets(context) -> dict[str, str]:
+    """Assign extracted literal values to the string parameters of the selected function."""
     parameter_names = list(context.selected_function.parameters)
 
     non_regex_string_params = [
@@ -160,6 +164,7 @@ def assign_string_targets(context) -> dict[str, str]:
     return assignment
 
 def guess_replacement_from_prompt(prompt: str) -> str | None:
+    """Return a replacement character based on a keyword found in the prompt."""
     words = re.findall(r"[a-zA-Z]+", prompt.lower())
     for word in words:
         if word in COMMON_REPLACEMENT_SYNONYMS:
@@ -167,15 +172,18 @@ def guess_replacement_from_prompt(prompt: str) -> str | None:
     return None
 
 class ParameterValueRule(ABC):
+    """Base class for rules that constrain and validate parameter values."""
 
     _token_text_cache: dict[int, str] = {}
 
     def __init__(self, model, vocabulary):
+        """Initialize the parameter value rule with the model and vocabulary."""
         self.model = model
         self.vocabulary = vocabulary
         self.token_ids: list[int] = []
 
     def _get_token_text(self, token_id: int) -> str:
+        """Return the text represented by a token ID, using a cache when available."""
         if token_id not in self._token_text_cache:
             self._token_text_cache[token_id] = self.model.decode([token_id])
 
@@ -183,28 +191,46 @@ class ParameterValueRule(ABC):
 
     @abstractmethod
     def get_allowed_tokens(self) -> set[int]:
+        """Return the token IDs allowed for the current parameter value."""
         raise NotImplementedError
 
     @abstractmethod
     def can_finish(self) -> bool:
+        """Return whether the current value is complete and valid."""
         raise NotImplementedError
 
+    @abstractmethod
+    def _is_valid_prefix(self, value: str) -> bool:
+        """Return whether the value can still become valid."""
+        raise NotImplementedError
+
+    # def validate(self) -> bool:
+    #     """Return whether the current value is valid."""
+    #     return True
+
     def validate(self) -> bool:
-        return True
+        """Return whether the current parameter value is a valid prefix."""
+        return self._is_valid_prefix(self.get_value())
     
     def add_token(self, token_id: int) -> None:
+        """Add a token to the current parameter value."""
         self.token_ids.append(token_id)
 
     def get_value(self) -> str:
+        """Return the current parameter value as text."""
         return self.model.decode(self.token_ids)
 
 
+
 class NumberParameterRule(ParameterValueRule):
+    """Constrains parameter values to valid decimal numbers."""
 
     def get_value(self) -> str:
+        """Return the current number value as text."""
         return self.model.decode(self.token_ids).strip()
 
     def get_allowed_tokens(self) -> set[int]:
+        """Return tokens that keep the value a valid number prefix."""
         allowed = set()
         current_value = self.get_value()
 
@@ -224,7 +250,7 @@ class NumberParameterRule(ParameterValueRule):
         return allowed
 
     def _is_valid_prefix(self, value: str) -> bool:
-        """Checks if the value is on a valid path to becoming a number."""
+        """Return whether the value can become a valid number."""
         if value == "" or value == "-":
             return True
 
@@ -234,17 +260,20 @@ class NumberParameterRule(ParameterValueRule):
         """Checks if the value is a complete number (can end here)."""
         return bool(re.fullmatch(r"-?\d+(?:\.\d+)?", self.get_value()))
 
-    def validate(self) -> bool:
-        """Validates intermediate tokens during generation."""
-        return self._is_valid_prefix(self.get_value())
+    # def validate(self) -> bool:
+    #     """Return whether the current value is a valid number prefix."""
+    #     return self._is_valid_prefix(self.get_value())
 
         
 class IntegerParameterRule(ParameterValueRule):
+    """Constrains parameter values to valid integers."""
 
     def get_value(self) -> str:
+        """Return the current integer value as text."""
         return self.model.decode(self.token_ids).strip()
 
     def get_allowed_tokens(self) -> set[int]:
+        """Return tokens that keep the value a valid integer prefix."""
         allowed = set()
         current_value = self.get_value()
 
@@ -262,31 +291,37 @@ class IntegerParameterRule(ParameterValueRule):
         return allowed
 
     def _is_valid_prefix(self, value: str) -> bool:
-        """Allow empty string or negative sign as initial prefix, followed strictly by digits."""
+        """Return whether the value can become a valid integer.
+        
+        Allow empty string or negative sign as initial prefix, followed strictly by digits."""
         if value == "" or value == "-":
             return True
 
         return bool(re.fullmatch(r"-?\d+", value))
 
     def can_finish(self) -> bool:
-        """Return True only when the accumulated text forms a complete integer."""
+        """Return whether the current value is a complete integer."""
         return bool(re.fullmatch(r"-?\d+", self.get_value()))
 
-    def validate(self) -> bool:
-        """Validate that the intermediate token sequence can form an integer."""
-        return self._is_valid_prefix(self.get_value())
+    # def validate(self) -> bool:
+    #     """Return whether the current value is a valid integer prefix."""
+    #     return self._is_valid_prefix(self.get_value())
 
 
 class BooleanParameterRule(ParameterValueRule):
+    """Constrains parameter values to supported boolean values."""
 
     TRUTHY = {"true", "1", "yes", "y", "on", "True"}
     FALSY = {"false", "0", "no", "n", "off", "False"}
     VALID_VALUES = TRUTHY | FALSY
 
     def get_value(self) -> str:
+        """Return the current boolean value as text."""
         return self.model.decode(self.token_ids).strip()
 
     def get_allowed_tokens(self) -> set[int]:
+        """Return tokens that keep the value a valid boolean prefix."""
+
         allowed = set()
         current_value = self.get_value()
 
@@ -308,23 +343,28 @@ class BooleanParameterRule(ParameterValueRule):
         return allowed
 
     def _is_valid_prefix(self, value: str) -> bool:
+        """Return whether the value can become a valid boolean."""
         if value == "":
             return True
         val_lower = value.lower()
         return any(v.lower().startswith(val_lower) for v in self.VALID_VALUES)
 
     def can_finish(self) -> bool:
+        """Return whether the current value is a complete boolean."""
         return self.get_value().lower() in {v.lower() for v in self.VALID_VALUES}
 
-    def validate(self) -> bool:
-        return self._is_valid_prefix(self.get_value())
+    # def validate(self) -> bool:
+    #     """Return whether the current value is a valid boolean prefix."""
+    #     return self._is_valid_prefix(self.get_value())
     
 
 class StringParameterRule(ParameterValueRule):
+    """Constrains string parameter values using free, exact, or synthesized modes."""
 
     SYNTHESIZE_MAX_LEN = 20  
 
     def __init__(self, model, vocabulary, target: str | None = None, mode: str = "free"):
+        """Initialize the string rule with an optional target and generation mode."""
         super().__init__(model, vocabulary)
         self.mode = mode
         self.target_tokens = (
@@ -332,6 +372,7 @@ class StringParameterRule(ParameterValueRule):
         )
 
     def get_value(self) -> str:
+        """Return the current string value as text."""
         raw = self.model.decode(self.token_ids).strip()
         if (raw.startswith('"') and raw.endswith('"')) or (
             raw.startswith("'") and raw.endswith("'")
@@ -340,6 +381,7 @@ class StringParameterRule(ParameterValueRule):
         return raw.strip(' "\'')
 
     def get_allowed_tokens(self) -> set[int]:
+        """Return tokens allowed by the current string generation mode."""
         if self.mode == "exact" and self.target_tokens:
             if len(self.token_ids) < len(self.target_tokens):
                 return {self.target_tokens[len(self.token_ids)]}
@@ -383,22 +425,29 @@ class StringParameterRule(ParameterValueRule):
         return allowed
     
     def can_finish(self) -> bool:
+        """Return whether the current string value can be completed."""
         if self.mode == "exact" and self.target_tokens:
             return self.token_ids == self.target_tokens
         return bool(self.get_value())
 
-    def validate(self) -> bool:
+    def _is_valid_prefix(self, value: str) -> bool:
+        """Return whether the current string value is valid."""
         if self.mode == "exact" and self.target_tokens:
-            return self.token_ids == self.target_tokens[: len(self.token_ids)]
-        val = self.get_value()
-        return not any(char in val for char in [",", ")", "(", ":", "\n"])
+            return self.token_ids == self.target_tokens[:len(self.token_ids)]
+
+        return not any(
+            char in value
+            for char in [",", ")", "(", ":", "\n"]
+        )
 
 class ParameterValueFactory:
+    """Creates the appropriate parameter-value rule for a parameter type."""
 
     SYNTHESIZED_STRING_PARAMS = {"regex", "pattern"}
 
     @staticmethod
     def build(parameter_type, model, vocabulary, target: str | None = None, parameter_name: str = ""):
+        """Create a parameter value rule based on the parameter type and target."""
 
         if parameter_type == "number":
             return NumberParameterRule(model, vocabulary)
