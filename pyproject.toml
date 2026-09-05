@@ -18,3 +18,7 @@ dev = [
 
 [tool.uv.sources]
 llm-sdk = { path = "llm_sdk" }
+
+[[tool.mypy.overrides]]
+module = "llm_sdk"
+follow_imports = "skip"
