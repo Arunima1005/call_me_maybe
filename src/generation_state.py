@@ -198,19 +198,19 @@ class ParameterValueState(GenerationState):
 
         target = None
         if parameter_type == "string":
+            string_targets = assign_string_targets(self.context)
+
             if (
                 parameter_name.lower()
                 in ParameterValueFactory.SYNTHESIZED_STRING_PARAMS
             ):
-                target = guess_regex_target(self.context)
+                target = guess_regex_target(self.context, string_targets)
             elif parameter_name.lower() == "replacement":
                 target = guess_replacement_from_prompt(
                     self.context.user_prompt
-                ) or assign_string_targets(
-                    self.context).get(parameter_name)
+                ) or string_targets.get(parameter_name)
             else:
-                target = assign_string_targets(
-                    self.context).get(parameter_name)
+                target = string_targets.get(parameter_name)
 
         self.value_rule: ParameterValueRule
 

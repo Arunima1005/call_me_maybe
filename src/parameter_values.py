@@ -86,12 +86,6 @@ def extract_trailing_word(prompt: str) -> str | None:
 
 def extract_colon_suffix(prompt: str) -> str | None:
     """Return the text appearing after the first colon in the prompt."""
-    """
-    Everything after the first ':' in the prompt, trimmed. For single-
-    string-param functions (e.g. fn_format_template) the whole remainder —
-    including any quotes/braces it contains — IS the literal value, not a
-    fragment carved out by quote-matching.
-    """
     match = re.search(r":\s*(.+)$", prompt)
     if not match:
         return None
@@ -160,17 +154,18 @@ def guess_replacement_from_prompt(prompt: str) -> str | None:
     return None
 
 
-def guess_regex_target(context: GenerationContext) -> str | None:
-    """Resolve the regex parameter's value: prefer a known category
-    pattern (e.g. 'vowels' -> [aeiouAEIOU]); if none matches, fall back
-    to a literal quoted value not already claimed by another parameter
-    (e.g. 'cat' in \"substitute 'cat' with 'dog'\"), since a bare word
-    like that is itself valid, correct regex."""
+def guess_regex_target(
+    context: GenerationContext,
+    assigned: dict[str, str] | None = None,
+) -> str | None:
+    """Return a regex pattern matching a keyword found in the prompt."""
     category_match = guess_regex_from_prompt(context.user_prompt)
     if category_match:
         return category_match
 
-    assigned = assign_string_targets(context)
+    if assigned is None:
+        assigned = assign_string_targets(context)
+
     used_values = set(assigned.values())
 
     for candidate in context.literal_candidates:
@@ -451,7 +446,7 @@ class StringParameterRule(ParameterValueRule):
 class ParameterValueFactory:
     """Creates the appropriate parameter-value rule for a parameter type."""
 
-    SYNTHESIZED_STRING_PARAMS = {"regex", "pattern"}
+    SYNTHESIZED_STRING_PARAMS = {"regex"}
 
     @staticmethod
     def build(
