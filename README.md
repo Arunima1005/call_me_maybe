@@ -44,9 +44,9 @@ The model can be selected from the command line.
 
 Running `make run` with the default model (`Qwen/Qwen3-0.6B`), 11 prompts. Waiting time is shortened in the video; the real run took about 3 minutes.
 
-<video src="assets/demo.mp4" controls width="100%"></video>
+![Call Me Maybe demo](assets/demo.gif)
 
-[▶ Watch the demo video](assets/demo.mp4)
+[▶ Watch as MP4 video](assets/demo.mp4)
 
 ---
 
